@@ -1,0 +1,9 @@
+maubot: 0.1.0
+id: xyz.maubot.maush
+version: 1.0.0
+license: AGPL-3.0-or-later
+modules:
+- maush
+main_class: MaushBot
+extra_files:
+- base-config.yaml

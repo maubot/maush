@@ -1,0 +1,7 @@
+# Rooms where the plugin can be used
+rooms:
+- !HnkyiOWbgSMdLAMROq:pink.packageloss.eu
+- !RPqRTvigdlvWyOwSWz:maunium.net
+
+# maush server url (https://mau.dev/tulir/maush/)
+server: https://example.com

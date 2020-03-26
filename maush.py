@@ -1,0 +1,172 @@
+# maushbot - A maubot to execute shell commands in maush from Matrix.
+# Copyright (C) 2020 Tulir Asokan
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+from typing import Dict, Any, Type
+import shlex
+import json
+import re
+
+from mautrix.types import (EventType, RoomTopicStateEventContent, RoomNameStateEventContent, RoomID,
+                           MessageType, StateEvent)
+from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
+
+from maubot import Plugin, MessageEvent
+from maubot.handlers import command, event
+
+
+class Config(BaseProxyConfig):
+    def do_update(self, helper: ConfigUpdateHelper) -> None:
+        helper.copy("rooms")
+        helper.copy("server")
+
+
+class MaushBot(Plugin):
+    name_cache: Dict[RoomID, str]
+    topic_cache: Dict[RoomID, str]
+
+    @classmethod
+    def get_config_class(cls) -> Type[BaseProxyConfig]:
+        return Config
+
+    async def start(self) -> None:
+        self.name_cache = {}
+        self.topic_cache = {}
+        self.on_external_config_update()
+
+    async def get_cached_name(self, room_id: RoomID) -> str:
+        if room_id not in self.name_cache:
+            name_evt = await self.client.get_state_event(room_id, EventType.ROOM_NAME)
+            self.name_cache[room_id] = (name_evt.name.strip()
+                                        if (isinstance(name_evt, RoomNameStateEventContent)
+                                            and name_evt.name)
+                                        else "")
+        return self.name_cache[room_id]
+
+    async def get_cached_topic(self, room_id: RoomID) -> str:
+        if room_id not in self.topic_cache:
+            topic_evt = await self.client.get_state_event(room_id, EventType.ROOM_TOPIC)
+            self.topic_cache[room_id] = (topic_evt.topic.strip()
+                                         if (isinstance(topic_evt, RoomTopicStateEventContent)
+                                             and topic_evt.topic)
+                                         else "")
+        return self.topic_cache[room_id]
+
+    async def _exec(self, evt: MessageEvent, **kwargs: Any) -> None:
+        http = self.client.api.session
+        old_name = await self.get_cached_name(evt.room_id)
+        old_topic = await self.get_cached_topic(evt.room_id)
+        devices = {}
+        if old_name:
+            devices["name"] = old_name
+        if old_topic:
+            devices["topic"] = old_topic
+        reply_to_id = evt.content.get_reply_to()
+        if reply_to_id:
+            reply_to_evt = await self.client.get_event(evt.room_id, reply_to_id)
+            devices["reply"] = reply_to_evt.content.body
+
+        localpart, server = self.client.parse_user_id(evt.sender)
+        resp = await http.post(self.config["server"], data=json.dumps({
+            **kwargs,
+            "user": evt.sender,
+            "home": re.sub(r"//+", "/", f"/{server}/{localpart}"),
+            "devices": devices,
+        }))
+        if resp.status == 502:
+            await evt.respond("maush is currently down")
+            return
+        data = await resp.json()
+        self.log.debug("Execution response for %s: %s", evt.sender, data)
+        if not data["ok"]:
+            self.log.error("Exec failed: %s", data["error"])
+            await evt.respond(data["error"])
+            return
+
+        dur = round(data["duration"] / 1_000_000, 1)
+        ret = data["return"]
+        if ret != 0:
+            resp = f"Exited with code {ret} in {dur} ms. "
+        else:
+            resp = f"Completed in {dur} ms. "
+        if data["timeout"]:
+            resp += "**Execution timed out**. "
+        if data["stdout"]:
+            stdout = data["stdout"].strip().replace("```", r"\```")
+            if len(stdout) >= 8190:
+                stdout = stdout[:8192] + "[…]"
+            resp += f"**stdout:**\n```\n{stdout}\n```\n"
+        if data["stderr"]:
+            stderr = data["stderr"].strip().replace("```", r"\```")
+            if len(stderr) >= 8190:
+                stderr = stderr[:8192] + "[…]"
+            resp += f"**stderr:**\n```\n{stderr}\n```\n"
+
+        resp = resp.strip()
+        if resp:
+            await evt.respond(resp)
+
+        new_dev = data["devices"]
+        new_name = new_dev.get("name") or ""
+        if new_name:
+            new_name = new_name.strip()
+        new_topic = new_dev.get("topic") or ""
+        if new_topic:
+            new_topic = new_topic.strip()
+        if new_name != old_name:
+            await self.client.send_state_event(evt.room_id, EventType.ROOM_NAME,
+                                               RoomNameStateEventContent(name=new_name))
+            self.name_cache[evt.room_id] = new_name
+        if new_topic != old_topic:
+            await self.client.send_state_event(evt.room_id, EventType.ROOM_TOPIC,
+                                               RoomTopicStateEventContent(topic=new_topic))
+            self.topic_cache[evt.room_id] = new_topic
+
+    def _exec_ok(self, evt: MessageEvent) -> bool:
+        return (evt.room_id in self.config["rooms"] and evt.content.msgtype == MessageType.TEXT
+                and evt.sender != self.client.mxid)
+
+    @event.on(EventType.ROOM_MESSAGE)
+    async def arbitrary_cmd(self, evt: MessageEvent) -> None:
+        if not self._exec_ok(evt) or (not evt.content.body.startswith("!!")
+                                      and not evt.content.body.startswith("!?")):
+            return
+        split = evt.content.body.split("\n\n", 1)
+        stdin = split[1] if len(split) > 1 else ""
+        split = split[0].split(" ", 1)
+        prefix, cmd = split[0][:2], split[0][2:]
+        args = [cmd]
+        if len(split) > 1:
+            args += shlex.split(split[1]) if prefix == "!?" else split[1].split(" ")
+        await self._exec(evt, language=cmd, args=args, raw=True, script=stdin)
+
+    @command.new("sh", aliases=["shell"])
+    @command.argument("script", required=True, pass_raw=True)
+    async def shell(self, evt: MessageEvent, script: str) -> None:
+        await self._exec(evt, language="sh", script=script)
+
+    @command.new("py", aliases=["python"])
+    @command.argument("script", required=True, pass_raw=True)
+    async def python(self, evt: MessageEvent, script: str) -> None:
+        if not self._exec_ok(evt):
+            return
+        await self._exec(evt, language="python", script=script)
+
+    @event.on(EventType.ROOM_NAME)
+    async def name_handler(self, evt: StateEvent) -> None:
+        self.name_cache[evt.room_id] = evt.content.name.strip() if evt.content.name else ""
+
+    @event.on(EventType.ROOM_TOPIC)
+    async def topic_handler(self, evt: StateEvent) -> None:
+        self.topic_cache[evt.room_id] = evt.content.topic.strip() if evt.content.topic else ""
