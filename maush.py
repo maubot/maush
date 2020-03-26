@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from typing import Dict, Any, Type
+import base64
 import shlex
 import json
 import re
@@ -79,7 +80,20 @@ class MaushBot(Plugin):
         reply_to_id = evt.content.get_reply_to()
         if reply_to_id:
             reply_to_evt = await self.client.get_event(evt.room_id, reply_to_id)
-            devices["reply"] = reply_to_evt.content.body
+            if reply_to_evt.content.msgtype.is_media:
+                url = self.client.api.get_download_url(reply_to_evt.content.url)
+                max_size = 8 * 1024 * 1024
+                async with self.client.api.session.head(url) as response:
+                    if int(response.headers["Content-Length"]) > max_size:
+                        await evt.reply("File too large")
+                        return
+                file = await self.client.download_media(reply_to_evt.content.url)
+                if len(file) > max_size:
+                    await evt.reply("File too large")
+                    return
+                devices["reply"] = base64.b64encode(file).decode("utf-8")
+            else:
+                devices["reply"] = reply_to_evt.content.body
 
         localpart, server = self.client.parse_user_id(evt.sender)
         resp = await http.post(self.config["server"], data=json.dumps({
