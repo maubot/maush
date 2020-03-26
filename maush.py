@@ -64,6 +64,10 @@ class MaushBot(Plugin):
         return self.topic_cache[room_id]
 
     async def _exec(self, evt: MessageEvent, **kwargs: Any) -> None:
+        if not self._exec_ok(evt):
+            self.log.debug(f"Ignoring exec {evt.event_id} from {evt.sender} in {evt.room_id}")
+            return
+
         http = self.client.api.session
         old_name = await self.get_cached_name(evt.room_id)
         old_topic = await self.get_cached_topic(evt.room_id)
@@ -159,9 +163,12 @@ class MaushBot(Plugin):
     @command.new("py", aliases=["python"])
     @command.argument("script", required=True, pass_raw=True)
     async def python(self, evt: MessageEvent, script: str) -> None:
-        if not self._exec_ok(evt):
-            return
         await self._exec(evt, language="python", script=script)
+
+    @command.new("js", aliases=["javascript", "node"])
+    @command.argument("script", required=True, pass_raw=True)
+    async def javascript(self, evt: MessageEvent, script: str) -> None:
+        await self._exec(evt, language="node.js", script=script)
 
     @event.on(EventType.ROOM_NAME)
     async def name_handler(self, evt: StateEvent) -> None:
