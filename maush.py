@@ -184,6 +184,11 @@ class MaushBot(Plugin):
     async def javascript(self, evt: MessageEvent, script: str) -> None:
         await self._exec(evt, language="node.js", script=script)
 
+    @command.new("el", aliases=["execline"])
+    @command.argument("script", required=True, pass_raw=True)
+    async def execline(self, evt: MessageEvent, script: str) -> None:
+        await self._exec(evt, language="execline", script=script)
+
     @event.on(EventType.ROOM_NAME)
     async def name_handler(self, evt: StateEvent) -> None:
         self.name_cache[evt.room_id] = evt.content.name.strip() if evt.content.name else ""
