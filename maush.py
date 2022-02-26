@@ -33,6 +33,11 @@ class Config(BaseProxyConfig):
         helper.copy("server")
 
 
+LINE_LIMIT = 256
+BYTE_LIMIT = 8192
+ELLIPSIS = "[…]"
+
+
 class MaushBot(Plugin):
     name_cache: Dict[RoomID, str]
     topic_cache: Dict[RoomID, str]
@@ -122,13 +127,17 @@ class MaushBot(Plugin):
             resp += "**Execution timed out**. "
         if data["stdout"]:
             stdout = data["stdout"].strip().replace("```", r"\```")
-            if len(stdout) >= 8190:
-                stdout = stdout[:8192] + "[…]"
+            if stdout.count("\n") > LINE_LIMIT:
+                stdout = "\n".join(stdout.split("\n")[:LINE_LIMIT] + [ELLIPSIS])
+            if len(stdout) > BYTE_LIMIT:
+                stdout = stdout[:BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
             resp += f"**stdout:**\n```\n{stdout}\n```\n"
         if data["stderr"]:
             stderr = data["stderr"].strip().replace("```", r"\```")
-            if len(stderr) >= 8190:
-                stderr = stderr[:8192] + "[…]"
+            if stderr.count("\n") > LINE_LIMIT:
+                stderr = "\n".join(stderr.split("\n")[:LINE_LIMIT] + [ELLIPSIS])
+            if len(stderr) > BYTE_LIMIT:
+                stderr = stderr[:BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
             resp += f"**stderr:**\n```\n{stderr}\n```\n"
 
         resp = resp.strip()
