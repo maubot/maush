@@ -96,7 +96,7 @@ class MaushBot(Plugin):
                 if len(file) > max_size:
                     await evt.reply("File too large")
                     return
-                devices["reply"] = base64.b64encode(file).decode("utf-8")
+                devices["reply"] = file
             else:
                 devices["reply"] = reply_to_evt.content.body
 
@@ -105,7 +105,10 @@ class MaushBot(Plugin):
             **kwargs,
             "user": evt.sender,
             "home": re.sub(r"//+", "/", f"/{server}/{localpart}"),
-            "devices": devices,
+            "devices": {
+                name: base64.b64encode(file.encode("utf-8") if isinstance(file, str) else file).decode("utf-8")
+                for name, file in devices.items()
+            },
         }))
         if resp.status == 502:
             await evt.respond("maush is currently down")
