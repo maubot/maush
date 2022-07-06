@@ -30,6 +30,7 @@ from maubot.handlers import command, event
 class Config(BaseProxyConfig):
     def do_update(self, helper: ConfigUpdateHelper) -> None:
         helper.copy("rooms")
+        helper.copy("admins")
         helper.copy("server")
 
 
@@ -180,6 +181,14 @@ class MaushBot(Plugin):
         if len(split) > 1:
             args += shlex.split(split[1]) if prefix == "!?" else split[1].split(" ")
         await self._exec(evt, language=cmd, args=args, raw=True, script=stdin)
+
+    @command.new("admin-sh")
+    @command.argument("script", required=True, pass_raw=True)
+    async def admin_shell(self, evt: MessageEvent, script: str) -> None:
+        if evt.sender not in self.config["admins"]:
+            await evt.reply("You're not an admin 😾")
+            return
+        await self._exec(evt, language="sh", script=script, admin=True)
 
     @command.new("sh", aliases=["shell"])
     @command.argument("script", required=True, pass_raw=True)

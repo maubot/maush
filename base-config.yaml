@@ -3,5 +3,8 @@ rooms:
 - '!HnkyiOWbgSMdLAMROq:pink.packageloss.eu'
 - '!RPqRTvigdlvWyOwSWz:maunium.net'
 
+# List of user IDs with extra privileges
+admins: []
+
 # maush server url (https://mau.dev/tulir/maush/)
 server: https://example.com
