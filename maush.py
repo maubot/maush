@@ -13,18 +13,23 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Dict, Any, Type
+from typing import Any, Dict, Type
 import base64
-import shlex
 import json
 import re
+import shlex
 
-from mautrix.types import (EventType, RoomTopicStateEventContent, RoomNameStateEventContent, RoomID,
-                           MessageType, StateEvent)
-from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
-
-from maubot import Plugin, MessageEvent
+from maubot import MessageEvent, Plugin
 from maubot.handlers import command, event
+from mautrix.types import (
+    EventType,
+    MessageType,
+    RoomID,
+    RoomNameStateEventContent,
+    RoomTopicStateEventContent,
+    StateEvent,
+)
+from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
 
 class Config(BaseProxyConfig):
@@ -59,19 +64,21 @@ class MaushBot(Plugin):
     async def get_cached_name(self, room_id: RoomID) -> str:
         if room_id not in self.name_cache:
             name_evt = await self.client.get_state_event(room_id, EventType.ROOM_NAME)
-            self.name_cache[room_id] = (name_evt.name.strip()
-                                        if (isinstance(name_evt, RoomNameStateEventContent)
-                                            and name_evt.name)
-                                        else "")
+            self.name_cache[room_id] = (
+                name_evt.name.strip()
+                if (isinstance(name_evt, RoomNameStateEventContent) and name_evt.name)
+                else ""
+            )
         return self.name_cache[room_id]
 
     async def get_cached_topic(self, room_id: RoomID) -> str:
         if room_id not in self.topic_cache:
             topic_evt = await self.client.get_state_event(room_id, EventType.ROOM_TOPIC)
-            self.topic_cache[room_id] = (topic_evt.topic.strip()
-                                         if (isinstance(topic_evt, RoomTopicStateEventContent)
-                                             and topic_evt.topic)
-                                         else "")
+            self.topic_cache[room_id] = (
+                topic_evt.topic.strip()
+                if (isinstance(topic_evt, RoomTopicStateEventContent) and topic_evt.topic)
+                else ""
+            )
         return self.topic_cache[room_id]
 
     async def _exec(self, evt: MessageEvent, **kwargs: Any) -> None:
@@ -109,17 +116,20 @@ class MaushBot(Plugin):
         if not allowed_localpart_regex.match(localpart):
             await evt.reply("User ID not supported")
             return
+        req_data = {
+            **kwargs,
+            "user": evt.sender,
+            "home": re.sub(r"//+", "/", f"/{server}/{localpart}"),
+            "untrusted": evt.sender in blacklist,
+            "devices": {
+                name: base64.b64encode(
+                    file.encode("utf-8") if isinstance(file, str) else file
+                ).decode("utf-8")
+                for name, file in devices.items()
+            },
+        }
         try:
-            resp = await http.post(self.config["server"], data=json.dumps({
-                **kwargs,
-                "user": evt.sender,
-                "home": re.sub(r"//+", "/", f"/{server}/{localpart}"),
-                "untrusted": evt.sender in blacklist,
-                "devices": {
-                    name: base64.b64encode(file.encode("utf-8") if isinstance(file, str) else file).decode("utf-8")
-                    for name, file in devices.items()
-                },
-            }))
+            resp = await http.post(self.config["server"], data=json.dumps(req_data))
         except Exception:
             await evt.reply("Failed to send request to maush")
             return
@@ -146,14 +156,14 @@ class MaushBot(Plugin):
             if stdout.count("\n") > LINE_LIMIT:
                 stdout = "\n".join(stdout.split("\n")[:LINE_LIMIT] + [ELLIPSIS])
             if len(stdout) > BYTE_LIMIT:
-                stdout = stdout[:BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
+                stdout = stdout[: BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
             resp += f"**stdout:**\n```\n{stdout}\n```\n"
         if data["stderr"]:
             stderr = data["stderr"].strip().replace("```", r"\```")
             if stderr.count("\n") > LINE_LIMIT:
                 stderr = "\n".join(stderr.split("\n")[:LINE_LIMIT] + [ELLIPSIS])
             if len(stderr) > BYTE_LIMIT:
-                stderr = stderr[:BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
+                stderr = stderr[: BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
             resp += f"**stderr:**\n```\n{stderr}\n```\n"
 
         resp = resp.strip()
@@ -167,26 +177,38 @@ class MaushBot(Plugin):
         new_topic = new_dev.get("topic") or ""
         if new_topic:
             new_topic = new_topic.strip()
-        if (evt.sender in blacklist or len(new_name) > 100 or len(new_topic) > 1000) and (new_name != old_name or new_topic != old_topic):
+        if (evt.sender in blacklist or len(new_name) > 100 or len(new_topic) > 1000) and (
+            new_name != old_name or new_topic != old_topic
+        ):
             await evt.reply("3:<")
             return
         if new_name != old_name:
-            await self.client.send_state_event(evt.room_id, EventType.ROOM_NAME,
-                                               RoomNameStateEventContent(name=new_name))
+            await self.client.send_state_event(
+                evt.room_id,
+                EventType.ROOM_NAME,
+                RoomNameStateEventContent(name=new_name),
+            )
             self.name_cache[evt.room_id] = new_name
         if new_topic != old_topic:
-            await self.client.send_state_event(evt.room_id, EventType.ROOM_TOPIC,
-                                               RoomTopicStateEventContent(topic=new_topic))
+            await self.client.send_state_event(
+                evt.room_id,
+                EventType.ROOM_TOPIC,
+                RoomTopicStateEventContent(topic=new_topic),
+            )
             self.topic_cache[evt.room_id] = new_topic
 
     def _exec_ok(self, evt: MessageEvent) -> bool:
-        return (evt.room_id in self.config["rooms"] and evt.content.msgtype == MessageType.TEXT
-                and evt.sender != self.client.mxid)
+        return (
+            evt.room_id in self.config["rooms"]
+            and evt.content.msgtype == MessageType.TEXT
+            and evt.sender != self.client.mxid
+        )
 
     @event.on(EventType.ROOM_MESSAGE)
     async def arbitrary_cmd(self, evt: MessageEvent) -> None:
-        if not self._exec_ok(evt) or (not evt.content.body.startswith("!!")
-                                      and not evt.content.body.startswith("!?")):
+        if not self._exec_ok(evt) or (
+            not evt.content.body.startswith("!!") and not evt.content.body.startswith("!?")
+        ):
             return
         split = evt.content.body.split("\n\n", 1)
         stdin = split[1] if len(split) > 1 else ""
