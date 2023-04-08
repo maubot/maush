@@ -39,6 +39,9 @@ BYTE_LIMIT = 8192
 ELLIPSIS = "[…]"
 
 
+allowed_localpart_regex = re.compile("^[A-Za-z0-9._=-]+$")
+
+
 class MaushBot(Plugin):
     name_cache: Dict[RoomID, str]
     topic_cache: Dict[RoomID, str]
@@ -102,6 +105,9 @@ class MaushBot(Plugin):
                 devices["reply"] = reply_to_evt.content.body
 
         localpart, server = self.client.parse_user_id(evt.sender)
+        if not allowed_localpart_regex.match(localpart):
+            await evt.reply("User ID not supported")
+            return
         resp = await http.post(self.config["server"], data=json.dumps({
             **kwargs,
             "user": evt.sender,
