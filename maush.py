@@ -28,6 +28,7 @@ from mautrix.types import (
     RoomNameStateEventContent,
     RoomTopicStateEventContent,
     StateEvent,
+    UserID,
 )
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
@@ -225,6 +226,16 @@ class MaushBot(Plugin):
         if evt.sender not in self.config["admins"]:
             await evt.reply("You're not an admin 😾")
             return
+        await self._exec(evt, language="sh", script=script, admin=True)
+
+    @command.new("sudo")
+    @command.argument("user_id", required=True)
+    @command.argument("script", required=True, pass_raw=True)
+    async def admin_shell(self, evt: MessageEvent, user_id: UserID, script: str) -> None:
+        if evt.sender not in self.config["admins"]:
+            await evt.reply("You're not an admin 😾")
+            return
+        evt.sender = user_id
         await self._exec(evt, language="sh", script=script, admin=True)
 
     @command.new("sh", aliases=["shell"])
