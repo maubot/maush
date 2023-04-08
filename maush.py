@@ -108,15 +108,19 @@ class MaushBot(Plugin):
         if not allowed_localpart_regex.match(localpart):
             await evt.reply("User ID not supported")
             return
-        resp = await http.post(self.config["server"], data=json.dumps({
-            **kwargs,
-            "user": evt.sender,
-            "home": re.sub(r"//+", "/", f"/{server}/{localpart}"),
-            "devices": {
-                name: base64.b64encode(file.encode("utf-8") if isinstance(file, str) else file).decode("utf-8")
-                for name, file in devices.items()
-            },
-        }))
+        try:
+            resp = await http.post(self.config["server"], data=json.dumps({
+                **kwargs,
+                "user": evt.sender,
+                "home": re.sub(r"//+", "/", f"/{server}/{localpart}"),
+                "devices": {
+                    name: base64.b64encode(file.encode("utf-8") if isinstance(file, str) else file).decode("utf-8")
+                    for name, file in devices.items()
+                },
+            }))
+        except Exception:
+            await evt.reply("Failed to send request to maush")
+            return
         if resp.status == 502:
             await evt.reply("maush is currently down")
             return
