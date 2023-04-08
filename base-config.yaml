@@ -6,5 +6,8 @@ rooms:
 # List of user IDs with extra privileges
 admins: []
 
+# List of user IDs with fewer privileges
+untrusted: []
+
 # maush server url (https://mau.dev/tulir/maush/)
 server: https://example.com

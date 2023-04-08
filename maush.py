@@ -38,6 +38,7 @@ class Config(BaseProxyConfig):
         helper.copy("rooms")
         helper.copy("admins")
         helper.copy("server")
+        helper.copy("untrusted")
 
 
 LINE_LIMIT = 256
@@ -46,7 +47,6 @@ ELLIPSIS = "[…]"
 
 
 allowed_localpart_regex = re.compile("^[A-Za-z0-9._=-]+$")
-blacklist = {"@exxxxkc:mozilla.org"}
 
 
 class MaushBot(Plugin):
@@ -121,7 +121,7 @@ class MaushBot(Plugin):
             **kwargs,
             "user": evt.sender,
             "home": re.sub(r"//+", "/", f"/{server}/{localpart}"),
-            "untrusted": evt.sender in blacklist,
+            "untrusted": evt.sender in self.config["untrusted"],
             "devices": {
                 name: base64.b64encode(
                     file.encode("utf-8") if isinstance(file, str) else file
@@ -178,9 +178,9 @@ class MaushBot(Plugin):
         new_topic = new_dev.get("topic") or ""
         if new_topic:
             new_topic = new_topic.strip()
-        if (evt.sender in blacklist or len(new_name) > 100 or len(new_topic) > 1000) and (
-            new_name != old_name or new_topic != old_topic
-        ):
+        if (
+            evt.sender in self.config["untrusted"] or len(new_name) > 100 or len(new_topic) > 1000
+        ) and (new_name != old_name or new_topic != old_topic):
             await evt.reply("3:<")
             return
         if new_name != old_name:
