@@ -23,6 +23,8 @@ from maubot import MessageEvent, Plugin
 from maubot.handlers import command, event
 from mautrix.types import (
     EventType,
+    FileInfo,
+    MediaMessageEventContent,
     MessageType,
     RoomID,
     RoomNameStateEventContent,
@@ -197,6 +199,34 @@ class MaushBot(Plugin):
                 RoomTopicStateEventContent(topic=new_topic),
             )
             self.topic_cache[evt.room_id] = new_topic
+        out_file = data.get("out_file")
+        if out_file:
+            data = base64.b64decode(out_file["content"])
+            mime = out_file["mimetype"]
+            filename = out_file["name"]
+            uri = await self.client.upload_media(
+                data=data,
+                filename=filename,
+                mime_type=mime,
+            )
+            msgtype = MessageType.FILE
+            if mime.startswith("image/"):
+                msgtype = MessageType.IMAGE
+            elif mime.startswith("video/"):
+                msgtype = MessageType.VIDEO
+            elif mime.startswith("audio/"):
+                msgtype = MessageType.AUDIO
+            await evt.reply(
+                MediaMessageEventContent(
+                    msgtype=msgtype,
+                    body=filename,
+                    url=uri,
+                    info=FileInfo(
+                        size=len(data),
+                        mimetype=mime,
+                    ),
+                )
+            )
 
     def _exec_ok(self, evt: MessageEvent) -> bool:
         return (
