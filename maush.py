@@ -118,13 +118,13 @@ class MaushBot(Plugin):
             },
         }))
         if resp.status == 502:
-            await evt.respond("maush is currently down", in_thread=True)
+            await evt.reply("maush is currently down")
             return
         data = await resp.json()
         self.log.debug("Execution response for %s: %s", evt.sender, data)
         if not data["ok"]:
             self.log.error("Exec failed: %s", data["error"])
-            await evt.respond(data["error"], in_thread=True)
+            await evt.reply(data["error"])
             return
 
         dur = round(data["duration"] / 1_000_000, 1)
@@ -152,7 +152,7 @@ class MaushBot(Plugin):
 
         resp = resp.strip()
         if resp:
-            await evt.respond(resp, in_thread=True)
+            await evt.reply(resp)
 
         new_dev = data["devices"]
         new_name = new_dev.get("name") or ""
