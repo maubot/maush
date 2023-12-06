@@ -13,7 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Any, Dict, Type
+from __future__ import annotations
+
+from typing import Any
 import base64
 import json
 import re
@@ -34,6 +36,8 @@ from mautrix.types import (
 )
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
+from .ansitohtml import ansi_to_html
+
 
 class Config(BaseProxyConfig):
     def do_update(self, helper: ConfigUpdateHelper) -> None:
@@ -51,12 +55,13 @@ ELLIPSIS = "[…]"
 allowed_localpart_regex = re.compile("^[A-Za-z0-9._=-]+$")
 
 
+
 class MaushBot(Plugin):
-    name_cache: Dict[RoomID, str]
-    topic_cache: Dict[RoomID, str]
+    name_cache: dict[RoomID, str]
+    topic_cache: dict[RoomID, str]
 
     @classmethod
-    def get_config_class(cls) -> Type[BaseProxyConfig]:
+    def get_config_class(cls) -> type[BaseProxyConfig]:
         return Config
 
     async def start(self) -> None:
@@ -155,23 +160,23 @@ class MaushBot(Plugin):
         if data["timeout"]:
             resp += "**Execution timed out**. "
         if data["stdout"]:
-            stdout = data["stdout"].strip().replace("```", r"\```")
+            stdout = data["stdout"].strip()
             if stdout.count("\n") > LINE_LIMIT:
                 stdout = "\n".join(stdout.split("\n")[:LINE_LIMIT] + [ELLIPSIS])
             if len(stdout) > BYTE_LIMIT:
                 stdout = stdout[: BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
-            resp += f"**stdout:**\n```\n{stdout}\n```\n"
+            resp += f"**stdout:**\n<pre><code>\n{ansi_to_html(stdout)}\n</code></pre>\n"
         if data["stderr"]:
-            stderr = data["stderr"].strip().replace("```", r"\```")
+            stderr = data["stderr"].strip()
             if stderr.count("\n") > LINE_LIMIT:
                 stderr = "\n".join(stderr.split("\n")[:LINE_LIMIT] + [ELLIPSIS])
             if len(stderr) > BYTE_LIMIT:
                 stderr = stderr[: BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
-            resp += f"**stderr:**\n```\n{stderr}\n```\n"
+            resp += f"**stderr:**\n<pre><code>\n{ansi_to_html(stderr)}\n</code></pre>\n"
 
         resp = resp.strip()
         if resp:
-            await evt.reply(resp)
+            await evt.reply(resp, allow_html=True)
 
         new_dev = data["devices"]
         new_name = new_dev.get("name") or ""

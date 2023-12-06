@@ -3,7 +3,9 @@ id: xyz.maubot.maush
 version: 1.0.0
 license: AGPL-3.0-or-later
 modules:
+- ochre
+- stransi
 - maush
-main_class: MaushBot
+main_class: maush/MaushBot
 extra_files:
 - base-config.yaml
