@@ -269,7 +269,7 @@ class MaushBot(Plugin):
             args += shlex.split(split[1]) if prefix == "!?" else split[1].split(" ")
         await self._exec(evt, language=cmd, args=args, raw=True, script=stdin)
 
-    @command.new("admin-sh")
+    @command.new("admin-sh", aliases=["su"])
     @command.argument("script", required=True, pass_raw=True)
     async def admin_shell(self, evt: MessageEvent, script: str) -> None:
         if evt.sender not in self.config["admins"]:
