@@ -31,8 +31,10 @@ from mautrix.types import (
     RoomID,
     RoomNameStateEventContent,
     RoomTopicStateEventContent,
+    ReactionEvent,
     StateEvent,
     UserID,
+    EventID,
 )
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
@@ -59,6 +61,7 @@ allowed_localpart_regex = re.compile("^[A-Za-z0-9._=-]+$")
 class MaushBot(Plugin):
     name_cache: dict[RoomID, str]
     topic_cache: dict[RoomID, str]
+    allow_redact: set[EventID]
 
     @classmethod
     def get_config_class(cls) -> type[BaseProxyConfig]:
@@ -67,6 +70,7 @@ class MaushBot(Plugin):
     async def start(self) -> None:
         self.name_cache = {}
         self.topic_cache = {}
+        self.allow_redact = set()
         self.on_external_config_update()
 
     async def get_cached_name(self, room_id: RoomID) -> str:
@@ -165,18 +169,20 @@ class MaushBot(Plugin):
                 stdout = "\n".join(stdout.split("\n")[:LINE_LIMIT] + [ELLIPSIS])
             if len(stdout) > BYTE_LIMIT:
                 stdout = stdout[: BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
-            resp += f"**stdout:**\n<pre><code>\n{ansi_to_html(stdout)}\n</code></pre>\n"
+            resp += f"**stdout:**\n<pre><code>{ansi_to_html(stdout)}\n</code></pre>\n"
         if data["stderr"]:
             stderr = data["stderr"].strip()
             if stderr.count("\n") > LINE_LIMIT:
                 stderr = "\n".join(stderr.split("\n")[:LINE_LIMIT] + [ELLIPSIS])
             if len(stderr) > BYTE_LIMIT:
                 stderr = stderr[: BYTE_LIMIT - len(ELLIPSIS)] + ELLIPSIS
-            resp += f"**stderr:**\n<pre><code>\n{ansi_to_html(stderr)}\n</code></pre>\n"
+            resp += f"**stderr:**\n<pre><code>{ansi_to_html(stderr)}\n</code></pre>\n"
 
         resp = resp.strip()
         if resp:
-            await evt.reply(resp, allow_html=True)
+            evt_id = await evt.reply(resp, allow_html=True)
+            self.allow_redact.add(evt_id)
+            await self.client.react(evt.room_id, evt_id, "delete")
 
         new_dev = data["devices"]
         new_name = new_dev.get("name") or ""
@@ -221,7 +227,7 @@ class MaushBot(Plugin):
                 msgtype = MessageType.VIDEO
             elif mime.startswith("audio/"):
                 msgtype = MessageType.AUDIO
-            await evt.reply(
+            evt_id = await evt.reply(
                 MediaMessageEventContent(
                     msgtype=msgtype,
                     body=filename,
@@ -232,6 +238,8 @@ class MaushBot(Plugin):
                     ),
                 )
             )
+            self.allow_redact.add(evt_id)
+            await self.client.react(evt.room_id, evt_id, "delete")
 
     def _exec_ok(self, evt: MessageEvent) -> bool:
         return (
@@ -239,6 +247,12 @@ class MaushBot(Plugin):
             and evt.content.msgtype == MessageType.TEXT
             and evt.sender != self.client.mxid
         )
+
+    @event.on(EventType.REACTION)
+    async def reaction(self, evt: ReactionEvent) -> None:
+        if evt.content.relates_to.event_id in self.allow_redact and evt.sender != self.client.mxid:
+            self.allow_redact.remove(evt.content.relates_to.event_id)
+            await self.client.redact(evt.room_id, evt.content.relates_to.event_id, f"Delete requested by {evt.sender}")
 
     @event.on(EventType.ROOM_MESSAGE)
     async def arbitrary_cmd(self, evt: MessageEvent) -> None:
