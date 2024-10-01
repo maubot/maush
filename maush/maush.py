@@ -280,7 +280,7 @@ class MaushBot(Plugin):
     @command.new("sudo")
     @command.argument("user_id", required=True)
     @command.argument("script", required=True, pass_raw=True)
-    async def admin_shell(self, evt: MessageEvent, user_id: UserID, script: str) -> None:
+    async def sudo(self, evt: MessageEvent, user_id: UserID, script: str) -> None:
         if evt.sender not in self.config["admins"]:
             await evt.reply("You're not an admin 😾")
             return
