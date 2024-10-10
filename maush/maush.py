@@ -54,7 +54,7 @@ BYTE_LIMIT = 8192
 ELLIPSIS = "[…]"
 
 
-allowed_localpart_regex = re.compile("^[A-Za-z0-9._=-]+$")
+allowed_localpart_regex = re.compile(r"^[A-Za-z0-9._=+-]+$")
 
 
 
