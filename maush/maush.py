@@ -250,7 +250,7 @@ class MaushBot(Plugin):
 
     @event.on(EventType.REACTION)
     async def reaction(self, evt: ReactionEvent) -> None:
-        if evt.content.relates_to.event_id in self.allow_redact and evt.sender != self.client.mxid:
+        if evt.content.relates_to.event_id in self.allow_redact and evt.content.relates_to.key == "delete" and evt.sender != self.client.mxid:
             self.allow_redact.remove(evt.content.relates_to.event_id)
             await self.client.redact(evt.room_id, evt.content.relates_to.event_id, f"Delete requested by {evt.sender}")
 
