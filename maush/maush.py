@@ -273,7 +273,7 @@ class MaushBot(Plugin):
     @command.argument("script", required=True, pass_raw=True)
     async def admin_shell(self, evt: MessageEvent, script: str) -> None:
         if evt.sender not in self.config["admins"]:
-            await evt.reply("You're not an admin 😾")
+            await evt.reply(f"`{evt.sender}` is not in the sudoers file. This incident will be [reported](https://xkcd.com/838/).")
             return
         await self._exec(evt, language="sh", script=script, admin=True)
 
@@ -282,7 +282,7 @@ class MaushBot(Plugin):
     @command.argument("script", required=True, pass_raw=True)
     async def sudo(self, evt: MessageEvent, user_id: UserID, script: str) -> None:
         if evt.sender not in self.config["admins"]:
-            await evt.reply("You're not an admin 😾")
+            await evt.reply(f"`{evt.sender}` is not in the sudoers file. This incident will be [reported](https://xkcd.com/838/).")
             return
         evt.sender = user_id
         await self._exec(evt, language="sh", script=script, admin=True)
