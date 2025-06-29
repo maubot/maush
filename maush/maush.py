@@ -24,10 +24,12 @@ import shlex
 from maubot import MessageEvent, Plugin
 from maubot.handlers import command, event
 from mautrix.types import (
+    ContentURI,
     EventType,
     FileInfo,
     MediaMessageEventContent,
     MessageType,
+    RoomAvatarStateEventContent,
     RoomID,
     RoomNameStateEventContent,
     RoomTopicStateEventContent,
@@ -57,10 +59,10 @@ ELLIPSIS = "[…]"
 allowed_localpart_regex = re.compile(r"^[A-Za-z0-9._=+-]+$")
 
 
-
 class MaushBot(Plugin):
     name_cache: dict[RoomID, str]
     topic_cache: dict[RoomID, str]
+    avatar_cache: dict[RoomID, ContentURI]
     allow_redact: set[EventID]
 
     @classmethod
@@ -70,6 +72,7 @@ class MaushBot(Plugin):
     async def start(self) -> None:
         self.name_cache = {}
         self.topic_cache = {}
+        self.avatar_cache = {}
         self.allow_redact = set()
         self.on_external_config_update()
 
@@ -88,41 +91,72 @@ class MaushBot(Plugin):
             topic_evt = await self.client.get_state_event(room_id, EventType.ROOM_TOPIC)
             self.topic_cache[room_id] = (
                 topic_evt.topic.strip()
-                if (isinstance(topic_evt, RoomTopicStateEventContent) and topic_evt.topic)
+                if (
+                    isinstance(topic_evt, RoomTopicStateEventContent)
+                    and topic_evt.topic
+                )
                 else ""
             )
         return self.topic_cache[room_id]
 
+    async def get_cached_avatar(self, room_id: RoomID) -> str:
+        if room_id not in self.avatar_cache:
+            avatar_evt = await self.client.get_state_event(
+                room_id, EventType.ROOM_AVATAR
+            )
+            self.avatar_cache[room_id] = (
+                avatar_evt.url
+                if (
+                    isinstance(avatar_evt, RoomAvatarStateEventContent)
+                    and avatar_evt.url
+                )
+                else ContentURI("")
+            )
+        return self.avatar_cache[room_id]
+
+    async def _get_reply_file(self, mxc: ContentURI) -> bytes | None:
+        url = self.client.api.get_download_url(mxc)
+        max_size = 8 * 1024 * 1024
+        async with self.client.api.session.head(url) as response:
+            if int(response.headers.get("Content-Length", "0")) > max_size:
+                return None
+        file = await self.client.download_media(mxc)
+        if len(file) > max_size:
+            return None
+        return file
+
     async def _exec(self, evt: MessageEvent, **kwargs: Any) -> None:
         if not self._exec_ok(evt):
-            self.log.debug(f"Ignoring exec {evt.event_id} from {evt.sender} in {evt.room_id}")
+            self.log.debug(
+                f"Ignoring exec {evt.event_id} from {evt.sender} in {evt.room_id}"
+            )
             return
 
         http = self.client.api.session
         old_name = await self.get_cached_name(evt.room_id)
         old_topic = await self.get_cached_topic(evt.room_id)
+        old_avatar = await self.get_cached_avatar(evt.room_id)
         devices = {}
         if old_name:
             devices["name"] = old_name
         if old_topic:
             devices["topic"] = old_topic
+        if old_avatar:
+            devices["avatar-mxc"] = old_avatar
         reply_to_id = evt.content.get_reply_to()
         if reply_to_id:
             reply_to_evt = await self.client.get_event(evt.room_id, reply_to_id)
+            devices["reply"] = reply_to_evt.content.body
             if reply_to_evt.content.msgtype.is_media:
-                url = self.client.api.get_download_url(reply_to_evt.content.url)
-                max_size = 8 * 1024 * 1024
-                async with self.client.api.session.head(url) as response:
-                    if int(response.headers["Content-Length"]) > max_size:
-                        await evt.reply("File too large")
-                        return
-                file = await self.client.download_media(reply_to_evt.content.url)
-                if len(file) > max_size:
-                    await evt.reply("File too large")
-                    return
-                devices["reply"] = file
-            else:
-                devices["reply"] = reply_to_evt.content.body
+                devices["reply-mxc"] = reply_to_evt.content.url
+                try:
+                    file = await self._get_reply_file(reply_to_evt.content.url)
+                    if file:
+                        devices["reply-file"] = file
+                except Exception:
+                    self.log.warning(
+                        "Failed to download media for shell", exc_info=True
+                    )
 
         localpart, server = self.client.parse_user_id(evt.sender)
         if not allowed_localpart_regex.match(localpart):
@@ -191,9 +225,20 @@ class MaushBot(Plugin):
         new_topic = new_dev.get("topic") or ""
         if new_topic:
             new_topic = new_topic.strip()
+        new_avatar = new_dev.get("avatar-mxc") or ""
+        if new_avatar:
+            new_avatar = new_avatar.strip()
         if (
-            evt.sender in self.config["untrusted"] or len(new_name) > 100 or len(new_topic) > 1000
-        ) and (new_name != old_name or new_topic != old_topic):
+            evt.sender in self.config["untrusted"]
+            or (len(new_name) > 100 and new_name != old_name)
+            or (len(new_topic) > 1000 and new_topic != old_topic)
+            or (
+                (not new_avatar.startswith("mxc://") or len(new_avatar) > 100)
+                and new_avatar != old_avatar
+            )
+        ) and (
+            new_name != old_name or new_topic != old_topic or new_avatar != old_avatar
+        ):
             await evt.reply("3:<")
             return
         if new_name != old_name:
@@ -210,6 +255,13 @@ class MaushBot(Plugin):
                 RoomTopicStateEventContent(topic=new_topic),
             )
             self.topic_cache[evt.room_id] = new_topic
+        if new_avatar != old_avatar:
+            await self.client.send_state_event(
+                evt.room_id,
+                EventType.ROOM_AVATAR,
+                RoomAvatarStateEventContent(url=new_avatar),
+            )
+            self.avatar_cache[evt.room_id] = new_avatar
         out_file = data.get("out_file")
         if out_file:
             data = base64.b64decode(out_file["content"])
@@ -250,14 +302,23 @@ class MaushBot(Plugin):
 
     @event.on(EventType.REACTION)
     async def reaction(self, evt: ReactionEvent) -> None:
-        if evt.content.relates_to.event_id in self.allow_redact and evt.content.relates_to.key == "delete" and evt.sender != self.client.mxid:
+        if (
+            evt.content.relates_to.event_id in self.allow_redact
+            and evt.content.relates_to.key == "delete"
+            and evt.sender != self.client.mxid
+        ):
             self.allow_redact.remove(evt.content.relates_to.event_id)
-            await self.client.redact(evt.room_id, evt.content.relates_to.event_id, f"Delete requested by {evt.sender}")
+            await self.client.redact(
+                evt.room_id,
+                evt.content.relates_to.event_id,
+                f"Delete requested by {evt.sender}",
+            )
 
     @event.on(EventType.ROOM_MESSAGE)
     async def arbitrary_cmd(self, evt: MessageEvent) -> None:
         if not self._exec_ok(evt) or (
-            not evt.content.body.startswith("!!") and not evt.content.body.startswith("!?")
+            not evt.content.body.startswith("!!")
+            and not evt.content.body.startswith("!?")
         ):
             return
         split = evt.content.body.split("\n\n", 1)
@@ -273,7 +334,9 @@ class MaushBot(Plugin):
     @command.argument("script", required=True, pass_raw=True)
     async def admin_shell(self, evt: MessageEvent, script: str) -> None:
         if evt.sender not in self.config["admins"]:
-            await evt.reply(f"`{evt.sender}` is not in the sudoers file. This incident will be [reported](https://xkcd.com/838/).")
+            await evt.reply(
+                f"`{evt.sender}` is not in the sudoers file. This incident will be [reported](https://xkcd.com/838/)."
+            )
             return
         await self._exec(evt, language="sh", script=script, admin=True)
 
@@ -282,7 +345,9 @@ class MaushBot(Plugin):
     @command.argument("script", required=True, pass_raw=True)
     async def sudo(self, evt: MessageEvent, user_id: UserID, script: str) -> None:
         if evt.sender not in self.config["admins"]:
-            await evt.reply(f"`{evt.sender}` is not in the sudoers file. This incident will be [reported](https://xkcd.com/838/).")
+            await evt.reply(
+                f"`{evt.sender}` is not in the sudoers file. This incident will be [reported](https://xkcd.com/838/)."
+            )
             return
         evt.sender = user_id
         await self._exec(evt, language="sh", script=script, admin=True)
@@ -309,8 +374,18 @@ class MaushBot(Plugin):
 
     @event.on(EventType.ROOM_NAME)
     async def name_handler(self, evt: StateEvent) -> None:
-        self.name_cache[evt.room_id] = evt.content.name.strip() if evt.content.name else ""
+        self.name_cache[evt.room_id] = (
+            evt.content.name.strip() if evt.content.name else ""
+        )
 
     @event.on(EventType.ROOM_TOPIC)
     async def topic_handler(self, evt: StateEvent) -> None:
-        self.topic_cache[evt.room_id] = evt.content.topic.strip() if evt.content.topic else ""
+        self.topic_cache[evt.room_id] = (
+            evt.content.topic.strip() if evt.content.topic else ""
+        )
+
+    @event.on(EventType.ROOM_AVATAR)
+    async def avatar_handler(self, evt: StateEvent) -> None:
+        self.avatar_cache[evt.room_id] = (
+            evt.content.url.strip() if evt.content.url else ""
+        )
