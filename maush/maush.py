@@ -235,6 +235,7 @@ class MaushBot(Plugin):
             or (
                 (not new_avatar.startswith("mxc://") or len(new_avatar) > 100)
                 and new_avatar != old_avatar
+                and new_avatar
             )
         ) and (
             new_name != old_name or new_topic != old_topic or new_avatar != old_avatar
